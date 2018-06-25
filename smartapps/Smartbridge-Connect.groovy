@@ -22,7 +22,7 @@ definition(
     category: "SmartThings Labs",
     iconUrl: "https://s3.amazonaws.com/yeelight-images/yeelightlogo.png",
     iconX2Url: "https://s3.amazonaws.com/yeelight-images/yeelightlogo%402x.png",
-    iconX3Url: "https://s3.amazonaws.com/yeelight-images/yeelightlogo%402x.png",
+    iconX3Url: "https://s3.amazonaws.com/yeelight-images/yeelightlogo%402x.png",,
     singleInstance: true)
 
 
@@ -40,9 +40,6 @@ preferences {
 
 def mainPage() {
 	dynamicPage(name: "mainPage", title: "Manage your Devices", nextPage: null, uninstall: true, install: true) {
-		section("Install Type") {
-        	input(name:"bridgeString", required:true, defaultValue:"SmartBridge", type:"enum",title:"Install Type", options:["TestBridge", "SmartBridge"])
-        }
         section("Configure"){
            href "deviceDiscovery", title:"Discover Devices", description:""
         }
@@ -204,12 +201,14 @@ private getDeviceID(number) {
 
 
 def installed() {
-	log.debug("installed: ")
+	log.debug("installed: setting bridgeIP and port to blank, was " + state.bridgeIP + ":" + state.bridgePort )
+	//state.bridgeIP=""
+	//state.bridgePort=""
 	initialize()
 }
 
 def updated() {
-	log.debug("updated:")
+	log.debug("updated:  bridgeIP and port=" + state.bridgeIP + ":" + state.bridgePort )
     log.debug("API = " + getApiServerUrl())
 	unsubscribe()
     unschedule()
@@ -217,8 +216,7 @@ def updated() {
 }
 
 def initialize() {
-	def bridgeString = "SmartBridge"
-	log.debug("initialize:" + bridgeString)
+	log.debug("initialize:  bridgeIP and port=" + state.bridgeIP + ":" + state.bridgePort )	
     ssdpSubscribe()
     subscribe(location, null, onLocation, [filterEvents:false])
     runEvery5Minutes("ssdpDiscover")
@@ -293,8 +291,8 @@ def onLocation(evt) {
 }
 
 void ssdpDiscover() {
-    log.debug("ssdpDiscover: Discovering " + bridgeString + "(s)")
-    sendHubCommand(new physicalgraph.device.HubAction("lan discovery urn:schemas-upnp-org:device:" + bridgeString + "*", physicalgraph.device.Protocol.LAN))
+    log.debug("ssdpDiscover: Discovering SmartBridge current Bridge address = " + state.bridgeIP + ":" + state.bridgePort)
+    sendHubCommand(new physicalgraph.device.HubAction("lan discovery urn:schemas-upnp-org:device:SmartBridge:1", physicalgraph.device.Protocol.LAN))
     if (state.supportedDevices) {
         state.supportedDevices.each{
         	sendHubCommand(new physicalgraph.device.HubAction(it.discoverString, physicalgraph.device.Protocol.LAN))
@@ -304,7 +302,8 @@ void ssdpDiscover() {
 }
 
 void ssdpSubscribe() {
-	subscribe(location, "ssdpTerm.urn:schemas-upnp-org:device:" + bridgeString + "*", ssdpHandler)
+	subscribe(location, "ssdpTerm.urn:schemas-upnp-org:device:SmartBridge:1", ssdpHandler)
+	//log.debug "ssdpSubscribe: ssdpTerm.urn:schemas-upnp-org:device:   SmartBridge"
     state.fst = false
 	if (state.supportedDevices) {
 		state.supportedDevices.each{
@@ -316,26 +315,41 @@ void ssdpSubscribe() {
 void bridgeDescriptionHandler(physicalgraph.device.HubResponse hubResponse) {
 	def xml = hubResponse.xml
     def parsedEvent = parseLanMessage(hubResponse?.description)
-	state.supportedDevices =  parseJson(xml.device.supportedDevices.toString())
-    log.debug("bridgeDescriptionHandler bridge address=" + convertHexToIP(parsedEvent.ip) + ":" + convertHexToInt(parsedEvent.port) + " mac=" + parsedEvent.mac.toUpperCase() )
+	state.bridgeIP = convertHexToIP(parsedEvent.ip)
+	state.bridgePort = convertHexToInt(parsedEvent.port)
+	state.bridgeMac = parsedEvent.mac.toUpperCase()
+    state.supportedDevices =  parseJson(xml.device.supportedDevices.toString())
+    log.debug("bridgeDescriptionHandler bridge address=" + state.bridgeIP + ":" + state.bridgePort + " mac=" + state.bridgeMac )
     //log.debug("bridgeDescriptionHandler parsedJSON xml ssdps="+parseJson(xml.device.supportedDevices.toString()))
 }
 def ssdpHandler(evt) {
 	def hub = evt?.hubId
 	def parsedEvent = parseLanMessage(evt?.description)
+    /*
+    log.debug("ssdpHandler: DEBUG event details - " + " networkAddress=" + parsedEvent?.networkAddress + " deviceAddress=" + parsedEvent?.deviceAddress + " mac=" + parsedEvent.mac +
+              " ip=" + getIPPort(parsedEvent.networkAddress,parsedEvent.deviceAddress) +
+              " ssdpUSN=" + parsedEvent?.ssdpUSN +
+              " ssdpPath=" + parsedEvent?.ssdpPath +
+              " ssdpTerm=" + parsedEvent?.ssdpTerm +
+              " ssdpNTS="  + parsedEvent?.ssdpNTS +
+              " StateBrIP=" + state.bridgeIP + ":" + state.bridgePort )
+    */
     def defDetails
     if (state.supportedDevices) {
     	//state.supportedDevices.each {log.debug("ssdpHandler:supportedDevices usn=" + it.usn + " type=" + it.type + " deviceType=" + it.deviceType)}
         defDetails = state.supportedDevices.find{ it?.usn == parsedEvent.ssdpTerm }
     }
     //log.debug("ssdpHandler - DEBUG ssdUSN=" + parsedEvent?.ssdpUSN + " ssddpTerm=" + parsedEvent?.ssdpTerm + " def Detaukstype=" + defDetails?.type)
-	log.debug("ssdpHandler: event usn=" + parsedEvent?.ssdpUSN?.toString() + " bridgeString=" + bridgeString + "::" + " substr=" + parsedEvent?.ssdpUSN?.toString()[0..bridgeString.length()+1])
-    if (parsedEvent?.ssdpUSN?.toString()[0..bridgeString.length()+1] == bridgeString + "::") {
-        log.debug("ssdpHandler: Getting device description for Bridge host=" + convertHexToIP(parsedEvent.networkAddress) + ":" + convertHexToInt(parsedEvent.deviceAddress)
-								+ " uri=" + parsedEvent.ssdpPath + " mac=" + parsedEvent.mac.toUpperCase())
-		sendHubCommand(new physicalgraph.device.HubAction("""GET ${parsedEvent.ssdpPath} HTTP/1.1\r\nHOST: ${convertHexToIP(parsedEvent.networkAddress)}:${convertHexToInt(parsedEvent.deviceAddress)}\r\n\r\n""",
+    if (parsedEvent?.ssdpUSN?.toString()=="SmartBridge::urn:schemas-upnp-org:device:SmartBridge:1") {
+    	//log.debug("ssdpHandler:" + " Setting Bridge ip and port from " + state.bridgeIP+":" + state.bridgePort +
+        //		 		" to" + convertHexToIP(parsedEvent.networkAddress) + ":" + convertHexToInt(parsedEvent.deviceAddress) )
+		state.bridgeIP = convertHexToIP(parsedEvent.networkAddress)
+		state.bridgePort = convertHexToInt(parsedEvent.deviceAddress)
+		state.bridgeMac = parsedEvent.mac.toUpperCase()
+        log.debug("ssdpHandler: Getting device description for Bridge host=" + state.bridgeIP + ":" + state.bridgePort + " uri=" + parsedEvent.ssdpPath + " mac=" + state.bridgeMac)
+		sendHubCommand(new physicalgraph.device.HubAction("""GET ${parsedEvent.ssdpPath} HTTP/1.1\r\nHOST: ${state.bridgeIP}:${state.bridgePort}\r\n\r\n""",
 					physicalgraph.device.Protocol.LAN,
-					parsedEvent.mac.toUpperCase(),
+					state.bridgeMac,
 					[callback: bridgeDescriptionHandler]))
     } else if (defDetails) {
     	//log.debug("ssdpHandler - DEBUG parsedEvent=" + parsedEvent)
@@ -344,6 +358,14 @@ def ssdpHandler(evt) {
         def dni = parsedEvent.networkAddress.toUpperCase() + parsedEvent.deviceAddress.toUpperCase()
 		parsedEvent << ["hub": hub]
         parsedEvent << ["dni":dni]
+        /*
+        log.debug("Setting parsedEvent.dni dni=" + dni + " parsedEvent.dni" + parsedEvent.dni + " pE.networkAddress=" + parsedEvent.networkAddress + " pE.deviceAddress=" + parsedEvent.deviceAddress)
+        log.debug("ssdpHandler: We have a " + defDetails.type + " deviceType=" + defDetails.deviceType + " Name=" + lightDeviceName + 
+        								" USN=" + parsedEvent?.ssdpUSN + " dni=" + dni + 
+                                        " ip=" + getIPPort(parsedEvent.networkAddress,parsedEvent.deviceAddress) +
+                                        " mac=" + parsedEvent.mac +
+                                        " StateBrIP=" + state.bridgeIP + ":" + state.bridgePort )
+		*/
         if (devices."${lightDeviceName}") {
         	log.debug("ssdpHandler: device exists name=" + lightDeviceName + " dni=" + parsedEvent?.dni)
         	def d = devices."${lightDeviceName}"
@@ -389,23 +411,32 @@ def ssdpHandler(evt) {
     }
 }
 void verifyDevices() {
-	def devices = getDevices().findAll { it?.value?.verified != true }
-	devices.each {
-		def ip = convertHexToIP(it.value.networkAddress)
-		def port = convertHexToInt(it.value.deviceAddress)
-		String ssdpUSN = it.value.ssdpUSN.toString()
-		def lightDeviceName
-		if (ssdpUSN?.indexOf("::urn") > 1){
-			lightDeviceName = ssdpUSN[0..(ssdpUSN?.indexOf("::urn") - 1)]
-		}			
-		String host = "${ip}:${port}"
-		def uri = it.value.ssdpPath
-		def gParams = [ "path" : "/light",
-						"headers" : ["HOST":host],
-						"query" : ["uniqueName":it.key]
-					  ]
-		log.debug("verifyDevices: Getting device description for " + it.key + " params=" + gParams + " map =[callback: deviceDescriptionHandler]" )
-		sendHubCommand(new physicalgraph.device.HubAction(gParams, null, ["callback": deviceDescriptionHandler]))                
+	if (state.bridgeIP) {
+		def devices = getDevices().findAll { it?.value?.verified != true }
+		devices.each {
+			def ip = convertHexToIP(it.value.networkAddress)
+			def port = convertHexToInt(it.value.deviceAddress)
+			String ssdpUSN = it.value.ssdpUSN.toString()
+			def lightDeviceName
+			if (ssdpUSN?.indexOf("::urn") > 1){
+				lightDeviceName = ssdpUSN[0..(ssdpUSN?.indexOf("::urn") - 1)]
+			}			
+			String host = "${ip}:${port}"
+            def uri = it.value.ssdpPath
+            def gParams = [ "path" : "/light",
+            				"headers" : ["HOST":host],
+                            "query" : ["uniqueName":it.key]
+                          ]
+            log.debug("verifyDevices: Getting device description for " + it.key + " params=" + gParams + " map =[callback: deviceDescriptionHandler]" )
+            sendHubCommand(new physicalgraph.device.HubAction(gParams, null, ["callback": deviceDescriptionHandler]))
+			//log.debug("verifyDevices: Getting device description for " + it.key + " host=" + host + " uri=" + uri + " mac=" + state.bridgeMac)
+            //sendHubCommand(new physicalgraph.device.HubAction("""GET ${uri} HTTP/1.1\r\nHOST: $host\r\n\r\n""",
+			//		physicalgraph.device.Protocol.LAN,
+			//		state.bridgeMac,
+			//		[callback: deviceDescriptionHandler]))                  
+		}
+	} else {
+		log.debug("verifyDevices: bridge ip not set")
 	}
 }
 
@@ -415,7 +446,6 @@ def getDevices() {
 
 void deviceDescriptionHandler(physicalgraph.device.HubResponse hubResponse) {
 	def body = hubResponse.xml
-	def parsedEvent = parseLanMessage(hubResponse.description)
 	def devices = getDevices()
 	def device = devices.find {it?.key?.contains(body?.device?.UDN?.text())}
     def deviceDNI
@@ -426,7 +456,10 @@ void deviceDescriptionHandler(physicalgraph.device.HubResponse hubResponse) {
     */
 	if (body?.device?.friendlyName?.text()!="PlayBridge-Pi") {
     	if (device) {
-			//log.debug("deviceDescriptionHandler: parsedEvent mac=" + parsedEvent?.mac?.toUpperCase() + " event=" + parsedEvent)
+            if (state.bridgeMac==null) {
+                state.bridgeMac=body?.device?.bridgeMac?.text()
+                log.debug("deviceDescriptionHandler: bridgeMac was null now set to "+body?.device?.bridgeMac?.text())
+             }
             deviceDNI = convertIPtoHex(body?.device?.IP?.text()).toUpperCase() + convertPortToHex(body?.device?.port?.text())
 			/*
             log.debug("deviceDescriptionHandler: status=" + hubResponse.status + 
@@ -447,7 +480,6 @@ void deviceDescriptionHandler(physicalgraph.device.HubResponse hubResponse) {
                                     port: body?.device?.port?.text(),
                                     deviceHandler: body?.device.deviceHandler.text(),
                                     uniqueName: body?.device?.uniqueName?.text(),
-									bridgeMac: body?.device?.bridgeMac?.text().toUpperCase(),
                                     verified: true]
                 log.debug("deviceDescriptionHandler: Adding, friendly name=" + body?.device?.friendlyName?.text() + " uniqueName=" + body?.device?.uniqueName?.text() + 
                 									" IP=" + body?.device?.IP?.text() + " port=" + body?.device?.port?.text() + " dh=" + body?.device.deviceHandler.text() +
@@ -506,7 +538,6 @@ def addDevices() {
                                  "UDN" : selectedDevice.value.UDN,
                                  "IP" : selectedDevice.value.IP,
                                  "port" : selectedDevice.value.port,
-								 "bridgeMac" : selectedDevice.value.bridgeMac,
                                  "userSpecifiedName" : selectedDevice.value.userSpecifiedName
                              ]
 						])
@@ -576,45 +607,41 @@ public  Map getQueryMap( query)
 
 def doThis(childDevice,command,query) {
 	if (childDevice==null) {log.debug("doThis:childDevice is null")}
-    if (childDevice) {
+    if (state.bridgeMac && state.bridgeIP && childDevice) {
         def parsedQuery = [:]
         if (query) {parsedQuery=getQueryMap(query)}
         log.debug("doThis childDevice.uniqueName=" + childDevice.getDeviceDataByName("uniqueName") + " command=" + command + " parsedQuery=" + (parsedQuery?parsedQuery:"empty"))
-		def deviceIP = childDevice.getDeviceDataByName("ip");
-		def devicePort = childDevice.getDeviceDataByName("port");
-		def bridgeMac = childDevice.getDeviceDataByName("bridgeMac");
         parsedQuery["uniqueName"] = childDevice.getDeviceDataByName("uniqueName")
         sendHubCommand(new physicalgraph.device.HubAction(
             	[	method : "GET",
             		path   : "/HubAction" + command,
-            		headers : ["HOST": deviceIP + ":" + devicePort],
+            		headers : ["HOST":state.bridgeIP+":"+state.bridgePort],
             		query	: parsedQuery ],
-					bridgeMac,
+				state.bridgeMac,
             	[callback: "lightsHandler"]
 			))
-        log.debug("doThis: Sent command to bridge path=" + "/HubAction" + command + " host=" + deviceIP + ":" + devicePort + " query=" + parsedQuery)
-		if (command.contains("refresh")) {
-			def subscribePath = "/subscription"
-			//def subscribeCallBack = "<http://" + location.hubs[0].localIP + ":" + location.hubs[0].localSrvPortTCP + "/notify/returnmessage"
-			def subscribeCallBack = "<http://" + location.hubs[0].localIP + ":" + location.hubs[0].localSrvPortTCP + "/returnmessage"
-			def subscribeHost = deviceIP + ":" + devicePort
-			def result = new physicalgraph.device.HubAction(
-					method: "SUBSCRIBE",
-					path: subscribePath,
-					query: ["uniqueName": childDevice.getDeviceDataByName("uniqueName")],
-					headers: [
-						HOST: subscribeHost,
-						CALLBACK: subscribeCallBack,
-						NT: "upnp:event",
-						TIMEOUT: "Second-28800"
-					] )
-			sendHubCommand(result)
-			log.debug("doThis:refresh: SUBSCRIBE path=$subscribePath host=$subscribeHost callback=$subscribeCallBack")
-       }
+        log.debug("doThis: Sent command to bridge path=" + "/HubAction" + command + " host=" + state.bridgeIP + ":" + state.bridgePort + " query=" + parsedQuery)
     } else {
-        log.debug("doThis: ERROR CANNOT SEND command to bridge path=" + "/HubAction" + command + " query=" + parsedQuery)
+        log.debug("doThis: ERROR CANNOT SEND command to bridge path=" + "/HubAction" + command + " host=" + state.bridgeIP + ":" + state.bridgePort + " query=" + parsedQuery)
     }
- 
+    if (command.contains("refresh")) {
+        def subscribePath = "/subscription"
+        //def subscribeCallBack = "<http://" + location.hubs[0].localIP + ":" + location.hubs[0].localSrvPortTCP + "/notify/returnmessage"
+        def subscribeCallBack = "<http://" + location.hubs[0].localIP + ":" + location.hubs[0].localSrvPortTCP + "/returnmessage"
+        def subscribeHost = state.bridgeIP + ":" + state.bridgePort
+        def result = new physicalgraph.device.HubAction(
+                method: "SUBSCRIBE",
+                path: subscribePath,
+                query: ["uniqueName": childDevice.getDeviceDataByName("uniqueName")],
+                headers: [
+                    HOST: subscribeHost,
+                    CALLBACK: subscribeCallBack,
+                    NT: "upnp:event",
+                    TIMEOUT: "Second-28800"
+                ] )
+        sendHubCommand(result)
+        log.debug("doThis:refresh: SUBSCRIBE path=$subscribePath host=$subscribeHost callback=$subscribeCallBack")
+       } 
   return   
 }
 void returnmessage(){
@@ -641,8 +668,7 @@ void lightsHandler(physicalgraph.device.HubResponse hubResponse) {
                 childDevice.generateEvent([name: "switch", value: resp?.params?.value[0], displayed: false])
             } else if (resp?.method=="set_rgb") {
             	if (resp?.stColor) {
-                    //childDevice.generateEvent([name: "color", value: resp.stColor , displayed: false])
-					childDevice.generateEvent([name: "color", value: resp.stColor.hex , displayed: false])
+                    childDevice.generateEvent([name: "color", value: resp.stColor , displayed: false])
 				} else {
                     childDevice.generateEvent([name: "color", value: [red:resp?.params?.value[0].r,
                     													green:resp?.params?.value[0].g,
@@ -687,7 +713,7 @@ void lightsHandler(physicalgraph.device.HubResponse hubResponse) {
                 }
 
             } else {
-                log.debug("lightsHandler: Unknown command "+resp?.method)
+                log.debug("doThis: Unknown command "+resp?.method)
                 return
             }
 		} else {

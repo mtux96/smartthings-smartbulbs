@@ -22,7 +22,7 @@ definition(
     category: "SmartThings Labs",
     iconUrl: "https://s3.amazonaws.com/yeelight-images/yeelightlogo.png",
     iconX2Url: "https://s3.amazonaws.com/yeelight-images/yeelightlogo%402x.png",
-    iconX3Url: "https://s3.amazonaws.com/yeelight-images/yeelightlogo%402x.png",,
+    iconX3Url: "https://s3.amazonaws.com/yeelight-images/yeelightlogo%402x.png",
     singleInstance: true)
 
 
